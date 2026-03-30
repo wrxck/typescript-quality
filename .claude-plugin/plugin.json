@@ -1,0 +1,12 @@
+{
+  "name": "typescript-quality",
+  "version": "1.0.0",
+  "description": "Enforce TypeScript quality - no any types, prefer named exports, no console.log/debugger",
+  "author": {
+    "name": "Matt Hesketh",
+    "email": "matt@heskethwebdesign.co.uk"
+  },
+  "repository": "https://github.com/wrxck/typescript-quality",
+  "license": "MIT",
+  "keywords": ["typescript", "quality", "any", "exports", "console", "debugger", "linting"]
+}
