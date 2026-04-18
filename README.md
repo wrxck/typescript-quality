@@ -1,5 +1,7 @@
 # typescript-quality
 
+[![CI](https://github.com/wrxck/typescript-quality/actions/workflows/ci.yml/badge.svg)](https://github.com/wrxck/typescript-quality/actions/workflows/ci.yml)
+
 Enforce TypeScript quality standards in Claude Code sessions.
 
 ## What it checks
