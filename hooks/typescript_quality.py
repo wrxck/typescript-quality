@@ -13,7 +13,6 @@ from pathlib import Path
 
 TS_EXTENSIONS = {'.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'}
 
-# files where console/debugger are acceptable
 TEST_PATTERNS = [
     r'\.test\.',
     r'\.spec\.',
@@ -21,6 +20,93 @@ TEST_PATTERNS = [
     r'\.stories\.',
     r'\.storybook',
 ]
+
+
+def strip_strings_and_comments(code: str) -> str:
+    out = list(code)
+    i = 0
+    n = len(code)
+    state = None
+    tmpl_depth = 0
+    while i < n:
+        ch = code[i]
+        if state is None:
+            if ch == '/' and i + 1 < n and code[i + 1] == '/':
+                while i < n and code[i] != '\n':
+                    out[i] = ' '
+                    i += 1
+                continue
+            if ch == '/' and i + 1 < n and code[i + 1] == '*':
+                out[i] = ' '
+                out[i + 1] = ' '
+                i += 2
+                while i < n:
+                    if code[i] == '*' and i + 1 < n and code[i + 1] == '/':
+                        out[i] = ' '
+                        out[i + 1] = ' '
+                        i += 2
+                        break
+                    if code[i] != '\n':
+                        out[i] = ' '
+                    i += 1
+                continue
+            if ch == "'" or ch == '"':
+                state = ch
+                i += 1
+                continue
+            if ch == '`':
+                state = '`'
+                i += 1
+                continue
+            i += 1
+            continue
+        if state == "'" or state == '"':
+            if ch == '\\' and i + 1 < n:
+                if code[i] != '\n':
+                    out[i] = ' '
+                if code[i + 1] != '\n':
+                    out[i + 1] = ' '
+                i += 2
+                continue
+            if ch == state:
+                state = None
+                i += 1
+                continue
+            if ch != '\n':
+                out[i] = ' '
+            i += 1
+            continue
+        if state == '`':
+            if ch == '\\' and i + 1 < n:
+                if code[i] != '\n':
+                    out[i] = ' '
+                if code[i + 1] != '\n':
+                    out[i + 1] = ' '
+                i += 2
+                continue
+            if ch == '$' and i + 1 < n and code[i + 1] == '{':
+                i += 2
+                depth = 1
+                while i < n and depth > 0:
+                    c2 = code[i]
+                    if c2 == '{':
+                        depth += 1
+                    elif c2 == '}':
+                        depth -= 1
+                        if depth == 0:
+                            i += 1
+                            break
+                    i += 1
+                continue
+            if ch == '`':
+                state = None
+                i += 1
+                continue
+            if ch != '\n':
+                out[i] = ' '
+            i += 1
+            continue
+    return ''.join(out)
 
 
 def get_extension(file_path: str) -> str:
@@ -35,15 +121,14 @@ def is_test_file(file_path: str) -> bool:
     return any(re.search(p, file_path) for p in TEST_PATTERNS)
 
 
-def check_any_type(content: str, file_path: str) -> list[str]:
+def check_any_type(scrubbed: str, file_path: str) -> list[str]:
     """check for any type usage"""
     if get_extension(file_path) not in {'.ts', '.tsx'}:
         return []
 
     issues = []
-    lines = content.split('\n')
+    lines = scrubbed.split('\n')
 
-    # patterns that indicate `any` type usage
     any_patterns = [
         (r':\s*any\b', 'explicit any type'),
         (r'<any>', 'any in generic'),
@@ -54,11 +139,6 @@ def check_any_type(content: str, file_path: str) -> list[str]:
     ]
 
     for line_num, line in enumerate(lines, 1):
-        # skip comments
-        stripped = line.strip()
-        if stripped.startswith('//') or stripped.startswith('/*') or stripped.startswith('*'):
-            continue
-
         for pattern, description in any_patterns:
             if re.search(pattern, line):
                 issues.append(f"line {line_num}: {description} - use a proper type instead")
@@ -70,7 +150,6 @@ def check_any_type(content: str, file_path: str) -> list[str]:
 def is_nextjs_special_file(file_path: str) -> bool:
     """check if file is a next.js file that requires default export"""
     path = Path(file_path)
-    # next.js app router files that require default exports
     nextjs_files = {'page', 'layout', 'loading', 'error', 'not-found', 'template', 'default', 'middleware'}
     return path.stem in nextjs_files
 
@@ -78,12 +157,10 @@ def is_nextjs_special_file(file_path: str) -> bool:
 def requires_default_export(file_path: str) -> bool:
     """check if file requires default export by convention"""
     path = Path(file_path)
-    # config files that require default exports
     config_patterns = ['vite.config', 'vitest.config', 'tailwind.config', 'postcss.config']
-    # type declaration files for vue components
     if path.name == 'vite-env.d.ts' or path.name == 'env.d.ts':
         return True
-    return any(path.stem.startswith(p.replace('.', '')) or p in path.name for p in config_patterns)
+    return any(p in path.name for p in config_patterns)
 
 
 def check_default_exports(content: str, file_path: str) -> list[str]:
@@ -91,11 +168,9 @@ def check_default_exports(content: str, file_path: str) -> list[str]:
     if not is_ts_file(file_path):
         return []
 
-    # next.js app router requires default exports for certain files
     if is_nextjs_special_file(file_path):
         return []
 
-    # config files that require default exports by convention
     if requires_default_export(file_path):
         return []
 
@@ -103,7 +178,6 @@ def check_default_exports(content: str, file_path: str) -> list[str]:
     lines = content.split('\n')
 
     for line_num, line in enumerate(lines, 1):
-        # check for default exports
         if re.search(r'\bexport\s+default\b', line):
             issues.append(
                 f"line {line_num}: default export detected - prefer named exports for better refactoring"
@@ -112,33 +186,24 @@ def check_default_exports(content: str, file_path: str) -> list[str]:
     return issues
 
 
-def check_console_debugger(content: str, file_path: str) -> list[str]:
+def check_console_debugger(scrubbed: str, file_path: str) -> list[str]:
     """check for console.log and debugger statements"""
     if not is_ts_file(file_path):
         return []
 
-    # allow in test files
     if is_test_file(file_path):
         return []
 
     issues = []
-    lines = content.split('\n')
+    lines = scrubbed.split('\n')
 
     for line_num, line in enumerate(lines, 1):
-        # skip comments
-        stripped = line.strip()
-        if stripped.startswith('//') or stripped.startswith('/*') or stripped.startswith('*'):
-            continue
-
-        # check for console methods
         if re.search(r'\bconsole\.(log|debug|info|warn|error|trace|dir|table)\b', line):
-            # allow console.error and console.warn in production code (they're often intentional)
             if not re.search(r'\bconsole\.(error|warn)\b', line):
                 issues.append(
                     f"line {line_num}: console statement detected - remove before production"
                 )
 
-        # check for debugger
         if re.search(r'\bdebugger\b', line):
             issues.append(f"line {line_num}: debugger statement detected - remove before production")
 
@@ -147,11 +212,19 @@ def check_console_debugger(content: str, file_path: str) -> list[str]:
 
 def validate(file_path: str, content: str) -> list[str]:
     """run all typescript quality checks"""
+    scrubbed = strip_strings_and_comments(content)
     all_issues = []
-    all_issues.extend(check_any_type(content, file_path))
+    all_issues.extend(check_any_type(scrubbed, file_path))
     all_issues.extend(check_default_exports(content, file_path))
-    all_issues.extend(check_console_debugger(content, file_path))
+    all_issues.extend(check_console_debugger(scrubbed, file_path))
     return all_issues
+
+
+def extract_content(tool_input: dict) -> str:
+    edits = tool_input.get('edits')
+    if isinstance(edits, list) and edits:
+        return '\n'.join(e.get('new_string', '') for e in edits)
+    return tool_input.get('new_string', '') or tool_input.get('content', '')
 
 
 def main():
@@ -166,7 +239,7 @@ def main():
     if not file_path:
         sys.exit(0)
 
-    content = tool_input.get('new_string', '') or tool_input.get('content', '')
+    content = extract_content(tool_input)
     if not content:
         sys.exit(0)
 
